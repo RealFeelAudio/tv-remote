@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TV Remote — Network Scanner</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      padding: 32px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+
+    h1 span {
+      color: #4da6ff;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    button {
+      background: #4da6ff;
+      color: #000;
+      border: none;
+      padding: 10px 28px;
+      font-size: 1rem;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.15s;
+    }
+
+    button:hover { background: #6ab8ff; }
+    button:disabled { background: #2a4a66; color: #555; cursor: not-allowed; }
+
+    #status {
+      font-size: 0.9rem;
+      color: #888;
+    }
+
+    #status.active { color: #4da6ff; }
+    #status.done   { color: #4caf50; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #4da6ff;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #count {
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 10px 14px;
+      background: #1a1a1a;
+      color: #888;
+      font-weight: 600;
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #1e1e1e;
+      animation: fadeIn 0.3s ease;
+    }
+
+    tbody tr:hover { background: #1a1a1a; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    td {
+      padding: 12px 14px;
+      vertical-align: middle;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-ssdp     { background: #1e3a5f; color: #4da6ff; }
+    .badge-mdns     { background: #1e4f2a; color: #4caf50; }
+    .badge-portscan { background: #3f2a1e; color: #ff9a3c; }
+
+    .ip { font-family: monospace; color: #ccc; }
+    .name { font-weight: 600; color: #fff; }
+    .model { color: #888; font-size: 0.88rem; }
+
+    #empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #444;
+      font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>TV <span>Network Scanner</span></h1>
+
+  <div class="controls">
+    <button id="scanBtn">Scan Network</button>
+    <span id="status">Ready</span>
+    <span id="count"></span>
+  </div>
+
+  <table id="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>IP Address</th>
+        <th>Manufacturer</th>
+        <th>Model</th>
+        <th>Source</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+    </tbody>
+  </table>
+  <div id="empty">Click "Scan Network" to discover TVs on your network.</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const scanBtn = document.getElementById('scanBtn');
+    const status  = document.getElementById('status');
+    const tbody   = document.getElementById('tbody');
+    const empty   = document.getElementById('empty');
+    const count   = document.getElementById('count');
+
+    let deviceCount = 0;
+
+    function badgeClass(source) {
+      if (source === 'SSDP')      return 'badge-ssdp';
+      if (source === 'mDNS')      return 'badge-mdns';
+      if (source === 'Port Scan') return 'badge-portscan';
+      return '';
+    }
+
+    socket.on('scan_started', () => {
+      tbody.innerHTML = '';
+      deviceCount = 0;
+      empty.style.display = 'none';
+      count.textContent = '';
+      status.className = 'active';
+      status.innerHTML = '<span class="spinner"></span>Scanning…';
+      scanBtn.disabled = true;
+    });
+
+    socket.on('device_found', (device) => {
+      deviceCount++;
+      count.textContent = `${deviceCount} device${deviceCount !== 1 ? 's' : ''} found`;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="name">${escHtml(device.friendlyName)}</td>
+        <td class="ip">${escHtml(device.ip)}</td>
+        <td>${escHtml(device.manufacturer)}</td>
+        <td class="model">${escHtml(device.modelName)}</td>
+        <td><span class="badge ${badgeClass(device.source)}">${escHtml(device.source)}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    socket.on('scan_complete', () => {
+      status.className = 'done';
+      status.textContent = 'Scan complete';
+      scanBtn.disabled = false;
+      if (deviceCount === 0) {
+        empty.style.display = 'block';
+        empty.textContent = 'No TVs found. Make sure TVs are on the same network.';
+      }
+    });
+
+    scanBtn.addEventListener('click', () => {
+      socket.emit('start_scan');
+    });
+
+    function escHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+  </script>
+</body>
+</html>
